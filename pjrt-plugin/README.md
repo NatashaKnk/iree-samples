@@ -65,3 +65,50 @@ The plugins can be build with tracing enabled by adding the bazel build flag
 instrumentation will be sent to it. It can be useful to set the environment
 variable `TRACY_NO_EXIT=1` in order to block termination of one-shot programs
 that exit too quickly to stream all events.
+
+## ASAN
+
+Developing with ASAN is recommended but requires some special steps because
+of we need to arrange for the plugin to be able to link with undefined
+symbols and load the ASAN runtime library.
+
+* Edit out the `"-Wl,--no-undefined"` from `build_defs.bzl`
+* Set env var `LD_PRELOAD=$(clang-12 -print-file-name=libclang_rt.asan-x86_64.so)`
+  (assuming compiling with `clang-12`. See configured.bazelrc in the IREE repo).
+* Set env var `ASAN_OPTIONS=detect_leaks=0` (Python allocates a bunch of stuff
+  that it never frees. TODO: Make this more fine-grained so we can detect leaks in
+  plugin code).
+* `--config=asan`
+
+This can be improved and made more systematic but should work.
+
+## Running the Jax test suite
+
+The JAX test suite can be run with pytest. We recommend using `pytest-xdist`
+as it spawns tests in workers which can be restarted in the event of individual
+test case crashes.
+
+Setup:
+
+```
+# Install pytest
+pip install pytest pytest-xdist
+
+# Install the ctstools package from this repo (`-e` makes it editable).
+pip install -e ctstools
+```
+
+Example of running tests:
+
+```
+JAX_PLATFORMS=iree_cuda pytest -n4 --max-worker-restart=9999 \
+  -p openxla_pjrt_artifacts --openxla-pjrt-artifact-dir=/tmp/foobar \
+  ~/src/jax/tests/nn_test.py
+```
+
+Note that you will typically want a small number of workers (`-n4` above) for
+CUDA and a larger number can be tolerated for cpu.
+
+The plugin `openxla_pjrt_artifacts` is in the `ctstools` directory and
+performs additional manipulation of the environment in order to save
+compilation artifacts, reproducers, etc.
